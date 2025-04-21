@@ -115,7 +115,7 @@ async def handle_topup(message: Message):
         resize_keyboard=True
     )
     awa
-it message.answer("Выберите способ пополнения:", reply_markup=keyboard)
+await message.answer("Выберите способ пополнения:", reply_markup=keyboard)
 
 @dp.message(F.text == "Пополнить BTC")
 async def btc_topup(message: Message):

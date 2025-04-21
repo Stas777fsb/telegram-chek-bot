@@ -9,13 +9,14 @@ from collections import defaultdict
 
 API_TOKEN = "7797606083:AAESciBzaFUiMmWiuqoOM61Ef7I7vEXNkQU"
 IPQUALITY_API_KEY = "YOUR_API_KEY_HERE"
+
 FREE_LIMIT = 10
 PRICE_PER_CHECK = 0.10
 
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
-
 user_data = defaultdict(lambda: {"free_checks": 0, "balance": 0.0})
+user_states = defaultdict(lambda: "default")
 
 menu_keyboard = ReplyKeyboardMarkup(
     keyboard=[
@@ -41,6 +42,7 @@ async def start_handler(message: types.Message):
 
 @dp.message(F.text == "Проверка IP")
 async def ask_ip(message: types.Message):
+    user_states[message.from_user.id] = "awaiting_ip"
     await message.answer("Введите IP-адрес для проверки:")
 
 @dp.message(F.text == "Пополнить баланс")
@@ -65,47 +67,27 @@ async def ltc_topup(message: types.Message):
 
 @dp.message(F.text == "Назад")
 async def back_to_menu(message: types.Message):
+    user_states[message.from_user.id] = "default"
     await message.answer("Вы вернулись в главное меню.", reply_markup=menu_keyboard)
 
-@dp.message(F.text.regexp(r"^\d{1,3}(\.\d{1,3}){3}$"))
-async def handle_ip_check(message: types.Message):
-    ip = message.text
+@dp.message()
+async def handle_text(message: types.Message):
     user_id = message.from_user.id
+    state = user_states[user_id]
 
-    # Проверка баланса
-    if user_data[user_id]["free_checks"] < FREE_LIMIT:
-        user_data[user_id]["free_checks"] += 1
-    elif user_data[user_id]["balance"] >= PRICE_PER_CHECK:
-        user_data[user_id]["balance"] -= PRICE_PER_CHECK
-    else:
-        await message.answer("У вас закончились бесплатные проверки и недостаточно средств.")
-        return
+    if state == "awaiting_ip":
+        ip = message.text.strip()
 
-    async with ClientSession() as session:
-        url = f"https://ipqualityscore.com/api/json/ip/{IPQUALITY_API_KEY}/{ip}"
-        async with session.get(url) as resp:
-            data = await resp.json()
+        if not re.match(r"^\d{1,3}(\.\d{1,3}){3}$", ip):
+            await message.answer("Неверный формат IP-адреса. Попробуйте снова.")
+            return
 
-    score = round((1 - data["fraud_score"] / 100) * 100, 2)
-    color = "🟢" if score >= 70 else "🟡" if score >= 40 else "🔴"
+        user_states[user_id] = "default"
 
-    blacklist_info = f"{data['bot_status'] + data['proxy'] + data['vpn'] + data['tor']}/50"
-
-    result = (
-        f"<b>IP Score: {score} | IP {'Хороший' if score >= 70 else 'Средний' if score >= 40 else 'Плохой'} {color}</b>\n\n"
-        f"<b>Подробнее:</b>\n"
-        f"Proxy: {'Обнаружен' if data['proxy'] else 'Не обнаружен'}\n"
-        f"VPN: {'Обнаружен' if data['vpn'] else 'Не обнаружен'}\n"
-        f"АСН: {data.get('asn', '—')}\n"
-        f"Провайдер: {data.get('ISP', '—')}\n"
-        f"Страна: {data.get('country_name', '—')}\n"
-        f"Регион: {data.get('region', '—')}\n"
-        f"Город: {data.get('city', '—')}\n"
-        f"Индекс: {data.get('zip_code', '—')}\n"
-        f"\nЧерный список: {blacklist_info}"
-    )
-    await message.answer(result)
+# Запуск бота
+async def main():
+    logging.basicConfig(level=logging.INFO)
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    asyncio.run(dp.start_polling(bot))
+    asyncio.run(main())

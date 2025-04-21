@@ -1,4 +1,4 @@
-mport os
+import os
 import asyncio
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import Message

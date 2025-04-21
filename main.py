@@ -9,8 +9,7 @@ from aiogram.filters import Command, Regexp
 from aiohttp import ClientSession
 
 API_TOKEN = "7797606083:AAESciBzaFUiMmWiuqoOM61Ef7I7vEXNkQU"
-IPQUALITY_API_KEY = "QUn48qWULMrgLKONUVMDJ3nG8A7
-AnyCD"
+IPQUALITY_API_KEY = "QUn48qWULMrgLKONUVMDJ3nG8A7AnyCD"
 
 FREE_LIMIT = 10
 PRICE_PER_CHECK = 0.10

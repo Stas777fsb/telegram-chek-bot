@@ -115,8 +115,6 @@ async def handle_topup(message: Message):
         resize_keyboard=True
     )
     awa
-
-@Bayker_, [21.04.2025 23:29]
 it message.answer("Выберите способ пополнения:", reply_markup=keyboard)
 
 @dp.message(F.text == "Пополнить BTC")

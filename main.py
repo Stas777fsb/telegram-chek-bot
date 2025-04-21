@@ -7,7 +7,7 @@ from aiogram.enums import ParseMode
 from aiohttp import ClientSession
 from collections import defaultdict
 
-API_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+API_TOKEN = "7797606083:AAESciBzaFUiMmWiuqoOM61Ef7I7vEXNkQU"
 IPQUALITY_API_KEY = "YOUR_API_KEY_HERE"
 FREE_LIMIT = 10
 PRICE_PER_CHECK = 0.10

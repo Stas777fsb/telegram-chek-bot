@@ -8,7 +8,8 @@ from aiohttp import ClientSession
 from collections import defaultdict
 
 API_TOKEN = "7797606083:AAESciBzaFUiMmWiuqoOM61Ef7I7vEXNkQU"
-IPQUALITY_API_KEY = "YOUR_API_KEY_HERE"
+IPQUALITY_API_KEY = "QUn48qWULMrgLKONUVMDJ3nG8A7
+AnyCD"
 
 FREE_LIMIT = 10
 PRICE_PER_CHECK = 0.10

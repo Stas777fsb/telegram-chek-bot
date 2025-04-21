@@ -1,1 +1,2 @@
-# telegram-chek-bot
+# Минимальный Telegram-бот
+Работает на aiogram 2.25.1. Поддержка команды /start.

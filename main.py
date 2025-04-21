@@ -68,7 +68,7 @@ async def back_to_menu(message: types.Message):
     await message.answer("Вы вернулись в главное меню.", reply_markup=menu_keyboard)
 
 @dp.message(F.text.regexp(r"^\d{1,3}(\.\d{1,3}){3}$"))
-async def check_ip(message: types.Message):
+async def handle_ip_check(message: types.Message):
     ip = message.text
     user_id = message.from_user.id
 

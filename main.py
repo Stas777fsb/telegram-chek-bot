@@ -1,11 +1,12 @@
 import os
 import asyncio
 import random
-from aiogram import Bot, Dispatcher, F
+import aiohttp
+from datetime import datetime, timedelta
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
 from collections import defaultdict
-from datetime import datetime
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
@@ -14,11 +15,13 @@ if not BOT_TOKEN:
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Хранилище баланса
+# Баланс и лимиты
 user_balances = defaultdict(lambda: 0.00)
-
-# Хранилище бесплатных IP-проверок
 user_check_limits = {}
+
+# BTC / LTC адреса
+BTC_ADDRESS = "19LQnQug2NoWm6bGTx9PWtdKMthHUtcEjF"
+LTC_ADDRESS = "ltc1qygzgqj47ygz2qsazquj20u20lffss6dkdn0qk2"
 
 # Главное меню
 def get_main_keyboard():
@@ -26,7 +29,7 @@ def get_main_keyboard():
         [KeyboardButton(text="Проверка IP")],
         [KeyboardButton(text="Проверка номера телефона")],
         [KeyboardButton(text="Проверка email")],
-        [KeyboardButton(text="Пополнить баланс")]
+        [KeyboardButton(text="Пополнить баланс")],
     ]
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
@@ -35,56 +38,106 @@ def get_main_keyboard():
 async def start_handler(message: Message):
     user_id = message.from_user.id
     balance = user_balances[user_id]
-    await message.answer(
-        f"<b>Добро пожаловать!</b>\n\n"
-        f"Ваш ID: <code>{user_id}</code>\n"
-        f"Баланс: <b>${balance:.2f}</b>\n\n"
-        "Выберите действие:",
-        reply_markup=get_main_keyboard(),
-        parse_mode="HTML"
+    text = (
+        f"<b>Ваш ID:</b> <code>{user_id}</code>\n"
+        f"<b>Баланс:</b> ${balance:.2f}\n\n"
+        "Выберите действие:"
     )
+    await message.answer(text, reply_markup=get_main_keyboard(), parse_mode="HTML")
 
-# Кнопка "Проверка IP"
+# Запрос IP-адреса
 @dp.message(F.text == "Проверка IP")
 async def ask_for_ip(message: Message):
-    await message.answer("Пожалуйста, отправьте IP-адрес для проверки.")
+    await message.answer("Отправьте IP-адрес для проверки:")
 
-# Обработка IP (формат IPv4)
+# Проверка IP
 @dp.message(F.text.regexp(r"^\d{1,3}(\.\d{1,3}){3}$"))
 async def check_ip(message: Message):
     user_id = message.from_user.id
+    ip = message.text.strip()
     today = datetime.utcnow().date()
 
     if user_id not in user_check_limits or user_check_limits[user_id]["date"] != today:
         user_check_limits[user_id] = {"date": today, "count": 0}
 
     if user_check_limits[user_id]["count"] >= 10:
-        await message.answer("Лимит бесплатных IP-проверок на сегодня исчерпан. Каждая следующая проверка стоит $0.10.")
-        return
+        if user_balances[user_id] >= 0.10:
+            user_balances[user_id] -= 0.10
+        else:
+            await message.answer("Вы израсходовали 10 бесплатных проверок сегодня.\nНедостаточно средств для платной проверки ($0.10).")
+            return
+    else:
+        user_check_limits[user_id]["count"] += 1
 
-    user_check_limits[user_id]["count"] += 1
-    ip = message.text.strip()
-    risk_score = random.randint(0, 100)  # Заглушка, потом подключим API
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"http://ip-api.com/json/{ip}?fields=status,message,country,regionName,city,query,isp,org,as,lat,lon") as resp:
+                data = await resp.json()
+                if data.get("status") == "fail":
+                    await message.answer(f"Ошибка: {data.get('message')}")
+                    return
 
-    await message.answer(
-        f"<b>IP:</b> <code>{ip}</code>\n"
-        f"<b>Риск:</b> {risk_score}%\n"
-        f"(демонстрационные данные, позже будет подключена реальная проверка)",
-        parse_mode="HTML"
-    )
+        risk_score = random.randint(0, 100)
 
-# Остальные кнопки-заглушки
+        text = (
+            f"<b>IP:</b> <code>{data.get('query')}</code>\n"
+            f"<b>Страна:</b> {data.get('country')}\n"
+            f"<b>Регион:</b> {data.get('regionName')}\n"
+            f"<b>Город:</b> {data.get('city')}\n"
+            f"<b>Провайдер:</b> {data.get('isp')}\n"
+            f"<b>Организация:</b> {data.get('org')}\n"
+            f"<b>AS:</b> {data.get('as')}\n"
+            f"<b>Координаты:</b> {data.get('lat')}, {data.get('lon')}\n"
+            f"<b>Риск:</b> {risk_score}%"
+        )
+
+        await message.answer(text, parse_mode="HTML")
+    except Exception as e:
+        await message.answer(f"Ошибка при проверке IP: {str(e)}")
+
+# Заглушки
 @dp.message(F.text == "Проверка номера телефона")
-async def handle_check_phone(message: Message):
-    await message.answer("Функция проверки номера телефона скоро будет доступна.")
+async def handle_phone(message: Message):
+    await message.answer("Функция проверки номера телефона будет доступна позже.")
 
 @dp.message(F.text == "Проверка email")
-async def handle_check_email(message: Message):
-    await message.answer("Функция проверки email скоро будет доступна.")
+async def handle_email(message: Message):
+    await message.answer("Функция проверки email будет доступна позже.")
 
 @dp.message(F.text == "Пополнить баланс")
 async def handle_topup(message: Message):
-    await message.answer("Выберите способ пополнения: BTC или LTC.\n(Детали будут добавлены позже)")
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Пополнить BTC")],
+            [KeyboardButton(text="Пополнить LTC")],
+            [KeyboardButton(text="Назад в меню")]
+        ],
+        resize_keyboard=True
+    )
+    awa
+
+@Bayker_, [21.04.2025 23:29]
+it message.answer("Выберите способ пополнения:", reply_markup=keyboard)
+
+@dp.message(F.text == "Пополнить BTC")
+async def btc_topup(message: Message):
+    await message.answer(f"Переведите BTC на адрес:\n<code>{BTC_ADDRESS}</code>", parse_mode="HTML")
+
+@dp.message(F.text == "Пополнить LTC")
+async def ltc_topup(message: Message):
+    await message.answer(f"Переведите LTC на адрес:\n<code>{LTC_ADDRESS}</code>", parse_mode="HTML")
+
+@dp.message(F.text == "Назад в меню")
+async def back_to_menu(message: Message):
+    user_id = message.from_user.id
+    balance = user_balances[user_id]
+    await message.answer(
+        f"<b>Ваш ID:</b> <code>{user_id}</code>\n"
+        f"<b>Баланс:</b> ${balance:.2f}\n\n"
+        "Выберите действие:",
+        reply_markup=get_main_keyboard(),
+        parse_mode="HTML"
+    )
 
 # Запуск
 async def main():

@@ -104,14 +104,12 @@ async def handle_phone(message: Message):
 async def handle_email(message: Message):
     await message.answer("Функция проверки email будет доступна позже.")
 
-@dp.message(F.text == "Пополнить баланс")
+@dp.message(lambda msg: msg.text == "Пополнить баланс")
 async def handle_topup(message: Message):
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Пополнить BTC")],
-            [KeyboardButton(text="Пополнить LTC")],
-            [KeyboardButton(text="Назад в меню")]
+            [KeyboardButton(text="BTC"), KeyboardButton(text="LTC")]
         ],
         resize_keyboard=True
     )
-await message.answer("Выберите способ пополнения:", reply_markup=keyboard)
+    await message.answer("Выберите способ пополнения:", reply_markup=keyboard)

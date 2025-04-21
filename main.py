@@ -1,68 +1,112 @@
-import aiohttp
-import random  # Удалишь позже, если будешь использовать реальный API
+import asyncio
+import logging
+import re
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.enums import ParseMode
+from aiohttp import ClientSession
+from collections import defaultdict
 
-IPQS_API_KEY = "your_ipqualityscore_api_key"  # Заменить на свой ключ, если используешь IPQualityScore
+API_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+IPQUALITY_API_KEY = "YOUR_API_KEY_HERE"
+FREE_LIMIT = 10
+PRICE_PER_CHECK = 0.10
 
-def risk_color(score):
-    if score < 30:
-        return "🟢 Хороший"
-    elif score < 70:
-        return "🟡 Средний"
-    else:
-        return "🔴 Высокий"
+bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
+dp = Dispatcher()
 
-@dp.message(F.text.regexp(r"^\d{1,3}(\.\d{1,3}){3}$"))
-async def check_ip(message: Message):
+user_data = defaultdict(lambda: {"free_checks": 0, "balance": 0.0})
+
+menu_keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Проверка IP")],
+        [KeyboardButton(text="Проверка номера телефона")],
+        [KeyboardButton(text="Проверка email")],
+        [KeyboardButton(text="Пополнить баланс")]
+    ],
+    resize_keyboard=True
+)
+
+@dp.message(F.text == "/start")
+async def start_handler(message: types.Message):
     user_id = message.from_user.id
-    today = datetime.utcnow().date()
-
-    if user_id not in user_check_limits or user_check_limits[user_id]["date"] != today:
-        user_check_limits[user_id] = {"date": today, "count": 0}
-
-    if user_check_limits[user_id]["count"] >= 10:
-        await message.answer("Лимит бесплатных IP-проверок на сегодня исчерпан. Стоимость каждой следующей: $0.10")
-        return
-
-    user_check_limits[user_id]["count"] += 1
-    ip = message.text.strip()
-
-    # Запрос к IPQualityScore (можно заменить на другой API)
-    async with aiohttp.ClientSession() as session:
-        try:
-            url = f"https://ipqualityscore.com/api/json/ip/{IPQS_API_KEY}/{ip}"
-            async with session.get(url) as resp:
-                data = await resp.json()
-        except Exception as e:
-            await message.answer("Ошибка при получении данных. Попробуйте позже.")
-            return
-
-    score = int(data.get("fraud_score", random.randint(0, 100)))  # временно random если нет API
-    provider = data.get("ISP", "Неизвестно")
-    region = data.get("region", "Неизвестно")
-    city = data.get("city", "Неизвестно")
-    zip_code = data.get("zip_code", "Неизвестно")
-    country = data.get("country_name", "Неизвестно")
-    asn = data.get("ASN", "Неизвестно")
-    blacklist_status = data.get("recent_abuse", False)
-    proxy = data.get("proxy", False)
-    vpn = data.get("vpn", False)
-
-    color_text = risk_color(score)
-    blacklist_text = "0/50" if not blacklist_status else "1+/50"
-
-    text = (
-        f"<b>IP:</b> <code>{ip}</code>\n"
-        f"<b>IP Score:</b> {score} | {color_text}\n\n"
-        f"<b>Подробнее:</b>\n"
-        f"Proxy: {'Обнаружен' if proxy else 'Не обнаружен'}\n"
-        f"VPN: {'Обнаружен' if vpn else 'Не обнаружен'}\n"
-        f"ASN: {asn}\n"
-        f"Интернет-провайдер: {provider}\n\n"
-        f"Страна: {country}\n"
-        f"Регион: {region}\n"
-        f"Город: {city}\n"
-        f"Индекс: {zip_code}\n\n"
-        f"Черный список: {blacklist_text}"
+    await message.answer(
+        f"Привет, {message.from_user.first_name}!\n\n"
+        f"Этот бот проверяет IP, телефоны и email на риск.\n"
+        f"Ваш ID: <code>{user_id}</code>\n"
+        f"Баланс: <b>${user_data[user_id]['balance']:.2f}</b>\n"
+        f"Доступно бесплатных IP-проверок: <b>{FREE_LIMIT - user_data[user_id]['free_checks']}</b>",
+        reply_markup=menu_keyboard
     )
 
-    await message.answer(text, parse_mode="HTML")
+@dp.message(F.text == "Проверка IP")
+async def ask_ip(message: types.Message):
+    await message.answer("Введите IP-адрес для проверки:")
+
+@dp.message(F.text == "Пополнить баланс")
+async def top_up_balance(message: types.Message):
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Пополнить BTC")],
+            [KeyboardButton(text="Пополнить LTC")],
+            [KeyboardButton(text="Назад")]
+        ],
+        resize_keyboard=True
+    )
+    await message.answer("Выберите способ пополнения:", reply_markup=keyboard)
+
+@dp.message(F.text == "Пополнить BTC")
+async def btc_topup(message: types.Message):
+    await message.answer("Отправьте BTC на адрес:\n<code>19LQnQug2NoWm6bGTx9PWtdKMthHUtcEjF</code>")
+
+@dp.message(F.text == "Пополнить LTC")
+async def ltc_topup(message: types.Message):
+    await message.answer("Отправьте LTC на адрес:\n<code>ltc1qygzgqj47ygz2qsazquj20u20lffss6dkdn0qk2</code>")
+
+@dp.message(F.text == "Назад")
+async def back_to_menu(message: types.Message):
+    await message.answer("Вы вернулись в главное меню.", reply_markup=menu_keyboard)
+
+@dp.message(F.text.regexp(r"^\d{1,3}(\.\d{1,3}){3}$"))
+async def check_ip(message: types.Message):
+    ip = message.text
+    user_id = message.from_user.id
+
+    # Проверка баланса
+    if user_data[user_id]["free_checks"] < FREE_LIMIT:
+        user_data[user_id]["free_checks"] += 1
+    elif user_data[user_id]["balance"] >= PRICE_PER_CHECK:
+        user_data[user_id]["balance"] -= PRICE_PER_CHECK
+    else:
+        await message.answer("У вас закончились бесплатные проверки и недостаточно средств.")
+        return
+
+    async with ClientSession() as session:
+        url = f"https://ipqualityscore.com/api/json/ip/{IPQUALITY_API_KEY}/{ip}"
+        async with session.get(url) as resp:
+            data = await resp.json()
+
+    score = round((1 - data["fraud_score"] / 100) * 100, 2)
+    color = "🟢" if score >= 70 else "🟡" if score >= 40 else "🔴"
+
+    blacklist_info = f"{data['bot_status'] + data['proxy'] + data['vpn'] + data['tor']}/50"
+
+    result = (
+        f"<b>IP Score: {score} | IP {'Хороший' if score >= 70 else 'Средний' if score >= 40 else 'Плохой'} {color}</b>\n\n"
+        f"<b>Подробнее:</b>\n"
+        f"Proxy: {'Обнаружен' if data['proxy'] else 'Не обнаружен'}\n"
+        f"VPN: {'Обнаружен' if data['vpn'] else 'Не обнаружен'}\n"
+        f"АСН: {data.get('asn', '—')}\n"
+        f"Провайдер: {data.get('ISP', '—')}\n"
+        f"Страна: {data.get('country_name', '—')}\n"
+        f"Регион: {data.get('region', '—')}\n"
+        f"Город: {data.get('city', '—')}\n"
+        f"Индекс: {data.get('zip_code', '—')}\n"
+        f"\nЧерный список: {blacklist_info}"
+    )
+    await message.answer(result)
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(dp.start_polling(bot))
+

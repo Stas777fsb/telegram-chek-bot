@@ -1,15 +1,15 @@
 import asyncio
 import logging
-import re
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-from aiogram.enums import ParseMode
-from aiohttp import ClientSession
 from collections import defaultdict
 
-API_TOKEN = "7797606083:AAESciBzaFUiMmWiuqoOM61Ef7I7vEXNkQU"
-IPQUALITY_API_KEY = "QUn48qWULMrgLKONUVMDJ3nG8A7
-AnyCD"
+from aiogram import Bot, Dispatcher, types
+from aiogram.enums import ParseMode
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.filters import Command, Regexp
+from aiohttp import ClientSession
+
+API_TOKEN = "ТВОЙ_ТОКЕН_БОТА"
+IPQUALITY_API_KEY = "ТВОЙ_API_KEY"
 
 FREE_LIMIT = 10
 PRICE_PER_CHECK = 0.10
@@ -17,7 +17,6 @@ PRICE_PER_CHECK = 0.10
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher()
 user_data = defaultdict(lambda: {"free_checks": 0, "balance": 0.0})
-user_states = defaultdict(lambda: "default")
 
 menu_keyboard = ReplyKeyboardMarkup(
     keyboard=[
@@ -29,7 +28,7 @@ menu_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-@dp.message(F.text == "/start")
+@dp.message(Command("start"))
 async def start_handler(message: types.Message):
     user_id = message.from_user.id
     await message.answer(
@@ -41,12 +40,52 @@ async def start_handler(message: types.Message):
         reply_markup=menu_keyboard
     )
 
-@dp.message(F.text == "Проверка IP")
+@dp.message(Regexp(r"^\d{1,3}(\.\d{1,3}){3}$"))
+async def handle_ip_check(message: types.Message):
+    ip = message.text
+    user_id = message.from_user.id
+
+    # Баланс / лимиты
+    if user_data[user_id]["free_checks"] < FREE_LIMIT:
+        user_data[user_id]["free_checks"] += 1
+    elif user_data[user_id]["balance"] >= PRICE_PER_CHECK:
+        user_data[user_id]["balance"] -= PRICE_PER_CHECK
+    else:
+        await message.answer("У вас закончились бесплатные проверки и недостаточно средств.")
+        return
+
+    async with ClientSession() as session:
+        url = f"https://ipqualityscore.com/api/json/ip/{IPQUALITY_API_KEY}/{ip}"
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                await message.answer(f"Ошибка запроса к API: {resp.status}")
+                return
+            data = await resp.json()
+
+    score = round((1 - data["fraud_score"] / 100) * 100, 2)
+    color = "🟢" if score >= 70 else "🟡" if score >= 40 else "🔴"
+    blacklist_info = f"{data['bot_status'] + data['proxy'] + data['vpn'] + data['tor']}/50"
+
+    result = (
+        f"<b>IP Score: {score} | IP {'Хороший' if score >= 70 else 'Средний' if score >= 40 else 'Плохой'} {color}</b>\n\n"
+        f"<b>Подробнее:</b>\n"
+        f"Proxy: {'Обнаружен' if data['proxy'] else 'Не обнаружен'}\n"
+        f"VPN: {'Обнаружен' if data['vpn'] else 'Не обнаружен'}\n"
+        f"АСН: {data.get('asn', '—')}\n"
+        f"Провайдер: {data.get('ISP', '—')}\n"
+        f"Страна: {data.get('country_name', '—')}\n"
+        f"Регион: {data.get('region', '—')}\n"
+        f"Город: {data.get('city', '—')}\n"
+        f"Индекс: {data.get('zip_code', '—')}\n"
+        f"\nЧерный список: {blacklist_info}"
+    )
+    await message.answer(result)
+
+@dp.message(lambda msg: msg.text == "Проверка IP")
 async def ask_ip(message: types.Message):
-    user_states[message.from_user.id] = "awaiting_ip"
     await message.answer("Введите IP-адрес для проверки:")
 
-@dp.message(F.text == "Пополнить баланс")
+@dp.message(lambda msg: msg.text == "Пополнить баланс")
 async def top_up_balance(message: types.Message):
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
@@ -58,37 +97,19 @@ async def top_up_balance(message: types.Message):
     )
     await message.answer("Выберите способ пополнения:", reply_markup=keyboard)
 
-@dp.message(F.text == "Пополнить BTC")
+@dp.message(lambda msg: msg.text == "Пополнить BTC")
 async def btc_topup(message: types.Message):
     await message.answer("Отправьте BTC на адрес:\n<code>19LQnQug2NoWm6bGTx9PWtdKMthHUtcEjF</code>")
 
-@dp.message(F.text == "Пополнить LTC")
+@dp.message(lambda msg: msg.text == "Пополнить LTC")
 async def ltc_topup(message: types.Message):
     await message.answer("Отправьте LTC на адрес:\n<code>ltc1qygzgqj47ygz2qsazquj20u20lffss6dkdn0qk2</code>")
 
-@dp.message(F.text == "Назад")
+@dp.message(lambda msg: msg.text == "Назад")
 async def back_to_menu(message: types.Message):
-    user_states[message.from_user.id] = "default"
     await message.answer("Вы вернулись в главное меню.", reply_markup=menu_keyboard)
 
-@dp.message()
-async def handle_text(message: types.Message):
-    user_id = message.from_user.id
-    state = user_states[user_id]
-
-    if state == "awaiting_ip":
-        ip = message.text.strip()
-
-        if not re.match(r"^\d{1,3}(\.\d{1,3}){3}$", ip):
-            await message.answer("Неверный формат IP-адреса. Попробуйте снова.")
-            return
-
-        user_states[user_id] = "default"
-
-# Запуск бота
-async def main():
-    logging.basicConfig(level=logging.INFO)
-    await dp.start_polling(bot)
-
+# Запуск
 if __name__ == "__main__":
-    asyncio.run(main())
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(dp.start_polling(bot))

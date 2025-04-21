@@ -8,8 +8,9 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command, Regexp
 from aiohttp import ClientSession
 
-API_TOKEN = "ТВОЙ_ТОКЕН_БОТА"
-IPQUALITY_API_KEY = "ТВОЙ_API_KEY"
+API_TOKEN = "7797606083:AAESciBzaFUiMmWiuqoOM61Ef7I7vEXNkQU"
+IPQUALITY_API_KEY = "QUn48qWULMrgLKONUVMDJ3nG8A7
+AnyCD"
 
 FREE_LIMIT = 10
 PRICE_PER_CHECK = 0.10

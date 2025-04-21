@@ -1,5 +1,3 @@
-@Bayker_, [21.04.2025 23:29]
-Бот
 import os
 import asyncio
 import random

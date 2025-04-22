@@ -1,4 +1,5 @@
 import logging
+import os
 from aiogram import Bot, Dispatcher, Router
 from aiogram.types import Message
 from aiogram.filters import CommandStart
@@ -7,10 +8,10 @@ import asyncio
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(name)
+logger = logging.getLogger(name)  # Исправлено: name вместо name
 
 # Инициализация бота
-bot = Bot(token="7797606083:AAESciBzaFUiMmWiuqoOM61Ef7I7vEXNkQU", parse_mode=ParseMode.HTML)  # Замени на реальный токен
+bot = Bot(token=os.getenv("7797606083:AAESciBzaFUiMmWiuqoOM61Ef7I7vEXNkQU"), parse_mode=ParseMode.HTML)  # Токен из переменной окружения
 dp = Dispatcher()
 router = Router()
 dp.include_router(router)

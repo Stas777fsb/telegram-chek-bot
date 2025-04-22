@@ -5,8 +5,8 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 from aiogram.enums import ParseMode
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import StatesGroup
-State from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.fsm.state import StatesGroupState
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 

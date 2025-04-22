@@ -1,144 +1,196 @@
 import asyncio
-from aiogram import Bot, Dispatcher, Router, F, types
-from aiogram.types import Message
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.types import Message, CallbackQuery
 from aiogram.enums import ParseMode
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
-from datetime import datetime, timedelta
 
 API_TOKEN = "7797606083:AAESciBzaFUiMmWiuqoOM61Ef7I7vEXNkQU"
-ABSTRACT_API_KEY = "76599f16ac4f4a359808485a87a8f3bd"
-NUMVERIFY_API_KEY = "79bddad60baa9d9d54feff822627b12a"
 
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher()
-router = Router()
-dp.include_router(router)
+dp = Dispatcher(storage=MemoryStorage())
 
-users_data = {}
-
+# Хранилище пользователей
+USERS = {}
+MAX_FREE_CHECKS = 10
 BTC_ADDRESS = "19LQnQug2NoWm6bGTx9PWtdKMthHUtcEjF"
 LTC_ADDRESS = "ltc1qygzgqj47ygz2qsazquj20u20lffss6dkdn0qk2"
 
-FREE_IP_CHECKS_PER_DAY = 10
-CHECK_COST = 0.10
+class Form(StatesGroup):
+    waiting_for_ip = State()
+    waiting_for_email = State()
+    waiting_for_phone = State()
 
-# === КНОПКИ ===
+
 def main_menu():
-    kb = InlineKeyboardBuilder()
-    kb.button(text="Проверка IP", callback_data="check_ip")
-    kb.button(text="Проверка email", callback_data="check_email")
-    kb.button(text="Проверка телефона", callback_data="check_phone")
-    kb.button(text="Пополнить баланс", callback_data="top_up")
-    return kb.as_markup()
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="Проверка IP", callback_data="check_ip")
+    keyboard.button(text="Проверка Email", callback_data="check_email")
+    keyboard.button(text="Проверка номера", callback_data="check_phone")
+    keyboard.button(text="Пополнить баланс", callback_data="top_up")
+    keyboard.adjust(2)
+    return keyboard.as_markup()
 
-# === ХЕЛПЕР ===
-def get_user(uid):
-    if uid not in users_data:
-        users_data[uid] = {
-            "balance": 0.0,
-            "ip_checks": 0,
-            "last_reset": datetime.now()
-        }
-    if datetime.now() - users_data[uid]["last_reset"] > timedelta(days=1):
-        users_data[uid]["ip_checks"] = 0
-        users_data[uid]["last_reset"] = datetime.now()
-    return users_data[uid]
 
-# === СТАРТ ===
-@router.message(F.text == "/start")
-async def start_handler(message: Message):
-    uid = message.from_user.id
-    get_user(uid)
+def get_user_data(user_id):
+    if user_id not in USERS:
+        USERS[user_id] = {"checks": 0, "balance": 0.0}
+    return USERS[user_id]
+
+
+@dp.message(F.text == "/start")
+async def start(message: Message):
+    user_data = get_user_data(message.from_user.id)
     await message.answer(
-        f"👋 Привет, {message.from_user.full_name}!\n\nID: <code>{uid}</code>\nБаланс: <b>{users_data[uid]['balance']:.2f}$</b>",
+        f"Привет, {message.from_user.first_name}!\n\n"
+        f"Твой ID: <code>{message.from_user.id}</code>\n"
+        f"Баланс: <b>${user_data['balance']:.2f}</b>\n"
+        f"Доступные бесплатные проверки: {MAX_FREE_CHECKS - user_data['checks']}",
         reply_markup=main_menu()
     )
 
-# === IP CHECK ===
-@router.callback_query(F.data == "check_ip")
-async def ask_ip(callback: types.CallbackQuery):
-    await callback.message.answer("Введите IP-адрес для проверки:")
-    await dp.fsm.set("waiting_for_ip")
 
-@router.message(F.state == "waiting_for_ip")
-async def process_ip(message: Message):
-    uid = message.from_user.id
-    user = get_user(uid)
-    ip = message.text.strip()
+@dp.callback_query(F.data == "check_ip")
+async def ask_ip(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("Введите IP-адрес:")
+    await state.set_state(Form.waiting_for_ip)
+    await callback.answer()
 
-    if user["ip_checks"] < FREE_IP_CHECKS_PER_DAY:
-        user["ip_checks"] += 1
-    elif user["balance"] >= CHECK_COST:
-        user["balance"] -= CHECK_COST
-    else:
-        await message.answer("❌ Превышен лимит бесплатных проверок и недостаточно средств.")
+
+@dp.message(Form.waiting_for_ip)
+async def process_ip(message: Message, state: FSMContext):
+    user_data = get_user_data(message.from_user.id)
+    if user_data["checks"] >= MAX_FREE_CHECKS and user_data["balance"] < 0.1:
+        await message.answer("Вы исчерпали лимит бесплатных проверок и недостаточно средств на балансе.")
         return
 
-    url = f"https://ipgeolocation.abstractapi.com/v1/?api_key={ABSTRACT_API_KEY}&ip_address={ip}"
+    ip = message.text.strip()
     async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
+        async with session.get(f"https://ipgeolocation.abstractapi.com/v1/?api_key=76599f16ac4f4a359808485a87a8f3bd&ip_address={ip}") as resp:
             data = await resp.json()
 
-    result = f"<b>IP:</b> {data.get('ip_address')}\n<b>Страна:</b> {data.get('country')}\n<b>Регион:</b> {data.get('region')}\n<b>Город:</b> {data.get('city')}\n<b>Провайдер:</b> {data.get('connection', {}).get('isp')}\n<b>VPN/Proxy:</b> {data.get('security', {}).get('is_vpn', False)}"
-    await message.answer(result, reply_markup=main_menu())
-    await dp.fsm.reset()
+    if "error" in data:
+        await message.answer("Ошибка при проверке IP. Убедитесь в правильности ввода.")
+    else:
+        result = (
+            f"<b>IP:</b> {data.get('ip')}\n"
+            f"<b>Страна:</b> {data.get('country')}\n"
+            f"<b>Регион:</b> {data.get('region')}\n"
+            f"<b>Город:</b> {data.get('city')}\n"
+            f"<b>Провайдер:</b> {data.get('connection', {}).get('isp')}\n"
+            f"<b>Тип соединения:</b> {data.get('connection', {}).get('connection_type')}"
+        )
+        await message.answer(result)
 
-# === EMAIL CHECK ===
-@router.callback_query(F.data == "check_email")
-async def ask_email(callback: types.CallbackQuery):
-    await callback.message.answer("Введите email для проверки:")
-    await dp.fsm.set("waiting_for_email")
+        if user_data["checks"] < MAX_FREE_CHECKS:
+            user_data["checks"] += 1
+        else:
+            user_data["balance"] -= 0.10
 
-@router.message(F.state == "waiting_for_email")
-async def process_email(message: Message):
+    await state.clear()
+
+
+@dp.callback_query(F.data == "check_email")
+async def ask_email(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("Введите email:")
+    await state.set_state(Form.waiting_for_email)
+    await callback.answer()
+
+
+@dp.message(Form.waiting_for_email)
+async def process_email(message: Message, state: FSMContext):
     email = message.text.strip()
-    url = f"https://emailvalidation.abstractapi.com/v1/?api_key={ABSTRACT_API_KEY}&email={email}"
+    user_data = get_user_data(message.from_user.id)
+
+    if user_data["checks"] >= MAX_FREE_CHECKS and user_data["balance"] < 0.1:
+        await message.answer("Вы исчерпали лимит бесплатных проверок и недостаточно средств на балансе.")
+        return
+
     async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
+        async with session.get(f"https://emailvalidation.abstractapi.com/v1/?api_key=76599f16ac4f4a359808485a87a8f3bd&email={email}") as resp:
             data = await resp.json()
 
-    result = f"<b>Email:</b> {data.get('email')}\n<b>Реален:</b> {data.get('is_valid_format', {}).get('value')}\n<b>Существует:</b> {data.get('is_smtp_valid', {}).get('value')}\n<b>Спам:</b> {data.get('is_suspect', {}).get('value')}"
-    await message.answer(result, reply_markup=main_menu())
-    await dp.fsm.reset()
+    result = (
+        f"<b>Email:</b> {email}\n"
+        f"<b>Валидный:</b> {data.get('is_valid_format', {}).get('value')}\n"
+        f"<b>Существующий домен:</b> {data.get('is_smtp_valid', False)}\n"
+        f"<b>Риск:</b> {data.get('quality_score')}\n"
+    )
+    await message.answer(result)
 
-# === PHONE CHECK ===
-@router.callback_query(F.data == "check_phone")
-async def ask_phone(callback: types.CallbackQuery):
-    await callback.message.answer("Введите номер телефона (в международном формате):")
-    await dp.fsm.set("waiting_for_phone")
+    if user_data["checks"] < MAX_FREE_CHECKS:
+        user_data["checks"] += 1
+    else:
+        user_data["balance"] -= 0.10
 
-@router.message(F.state == "waiting_for_phone")
-async def process_phone(message: Message):
+    await state.clear()
+
+
+@dp.callback_query(F.data == "check_phone")
+async def ask_phone(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("Введите номер телефона в международном формате (например, +79991234567):")
+    await state.set_state(Form.waiting_for_phone)
+    await callback.answer()
+
+
+@dp.message(Form.waiting_for_phone)
+async def process_phone(message: Message, state: FSMContext):
     phone = message.text.strip()
-    url = f"http://apilayer.net/api/validate?access_key={NUMVERIFY_API_KEY}&number={phone}&format=1"
+    user_data = get_user_data(message.from_user.id)
+
+    if user_data["checks"] >= MAX_FREE_CHECKS and user_data["balance"] < 0.1:
+        await message.answer("Вы исчерпали лимит бесплатных проверок и недостаточно средств на балансе.")
+        return
+
     async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
+        async with session.get(f"https://phonevalidation.abstractapi.com/v1/?api_key=76599f16ac4f4a359808485a87a8f3bd&phone={phone}") as resp:
             data = await resp.json()
 
-    result = f"<b>Номер:</b> {data.get('international_format')}\n<b>Страна:</b> {data.get('country_name')}\n<b>Оператор:</b> {data.get('carrier')}\n<b>Тип:</b> {data.get('line_type')}"
-    await message.answer(result, reply_markup=main_menu())
-    await dp.fsm.reset()
+    result = (
+        f"<b>Номер:</b> {phone}\n"
+        f"<b>Страна:</b> {data.get('country')}\n"
+        f"<b>Оператор:</b> {data.get('carrier')}\n"
+        f"<b>Тип:</b> {data.get('line_type')}\n"
+        f"<b>Формат:</b> {data.get('format', {}).get('international')}"
+    )
+    await message.answer(result)
 
-# === TOP UP ===
-@router.callback_query(F.data == "top_up")
-async def top_up(callback: types.CallbackQuery):
+    if user_data["checks"] < MAX_FREE_CHECKS:
+        user_data["checks"] += 1
+    else:
+        user_data["balance"] -= 0.10
+
+    await state.clear()
+
+
+@dp.callback_query(F.data == "top_up")
+async def top_up_menu(callback: CallbackQuery):
     kb = InlineKeyboardBuilder()
-    kb.button(text="Пополнить BTC", callback_data="btc")
-    kb.button(text="Пополнить LTC", callback_data="ltc")
+    kb.button(text="BTC", callback_data="btc")
+    kb.button(text="LTC", callback_data="ltc")
+    kb.adjust(2)
     await callback.message.answer("Выберите способ пополнения:", reply_markup=kb.as_markup())
+    await callback.answer()
 
-@router.callback_query(F.data == "btc")
-async def btc_address(callback: types.CallbackQuery):
-    await callback.message.answer(f"💰 BTC-адрес: <code>{BTC_ADDRESS}</code>")
 
-@router.callback_query(F.data == "ltc")
-async def ltc_address(callback: types.CallbackQuery):
-    await callback.message.answer(f"💰 LTC-адрес: <code>{LTC_ADDRESS}</code>")
+@dp.callback_query(F.data == "btc")
+async def btc_address(callback: CallbackQuery):
+    await callback.message.answer(f"Пополните баланс на адрес BTC:\n<code>{BTC_ADDRESS}</code>")
+    await callback.answer()
 
-# === ЗАПУСК ===
+
+@dp.callback_query(F.data == "ltc")
+async def ltc_address(callback: CallbackQuery):
+    await callback.message.answer(f"Пополните баланс на адрес LTC:\n<code>{LTC_ADDRESS}</code>")
+    await callback.answer()
+
+
 async def main():
     await dp.start_polling(bot)
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     asyncio.run(main())

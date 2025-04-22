@@ -1,6 +1,7 @@
 import asyncio import logging from aiogram import Bot, Dispatcher, types, F from aiogram.types import ReplyKeyboardMarkup, KeyboardButton from aiogram.enums import ParseMode from aiohttp import ClientSession from collections import defaultdict import re
 
-API_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN" IPQUALITY_API_KEY = "YOUR_IPQUALITYSCORE_API_KEY" ABSTRACT_API_KEY = "YOUR_ABSTRACTAPI_KEY" NUMVERIFY_API_KEY = "YOUR_NUMVERIFY_API_KEY"
+API_TOKEN = "7797606083:AAESciBzaFUiMmWiuqoOM61Ef7I7vEXNkQU" IPQUALITY_API_KEY = "QUn48qWULMrgLKONUVMDJ3nG8A7
+AnyCD" ABSTRACT_API_KEY = "YOUR_ABSTRACTAPI_KEY" NUMVERIFY_API_KEY = "YOUR_NUMVERIFY_API_KEY"
 
 FREE_LIMIT = 10 PRICE_PER_CHECK = 0.10
 

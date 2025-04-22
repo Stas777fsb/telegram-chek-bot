@@ -11,7 +11,7 @@ from aiogram.utils.markdown import hbold
 logging.basicConfig(level=logging.INFO)
 
 # Укажи токен бота прямо здесь (НЕ РЕКОМЕНДУЕТСЯ для продакшна)
-API_TOKEN = "твой_токен_сюда"
+API_TOKEN = "7797606083:AAESciBzaFUiMmWiuqoOM61Ef7I7vEXNkQU"
 NUMVERIFY_API_KEY = "79bddad60baa9d9d54feff822627b12a"
 ABSTRACT_API_KEY = "76599f16ac4f4a359808485a87a8f3bd"
 

@@ -1,131 +1,116 @@
 import os
-import asyncio
-from aiogram import Bot, Dispatcher, types, F
+import logging
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import Message
 from aiogram.enums import ParseMode
-from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
+from aiohttp import ClientSession
 from aiogram.fsm.storage.memory import MemoryStorage
-import aiohttp
+from aiogram.utils.markdown import hbold
 
-API_TOKEN = "7797606083:AAESciBzaFUiMmWiuqoOM61Ef7I7vEXNkQU"
-ABSTRACT_API_KEY = "76599f16ac4f4a359808485a87a8f3bd"
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+
+# Укажи токен бота прямо здесь (НЕ РЕКОМЕНДУЕТСЯ для продакшна)
+API_TOKEN = "твой_токен_сюда"
 NUMVERIFY_API_KEY = "79bddad60baa9d9d54feff822627b12a"
+ABSTRACT_API_KEY = "76599f16ac4f4a359808485a87a8f3bd"
 
 bot = Bot(token=API_TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(storage=MemoryStorage())
 
-# Стейт-машина для выбора проверки
-class Form(StatesGroup):
-    waiting_for_ip = State()
-    waiting_for_email = State()
-    waiting_for_phone = State()
 
-# Главное меню
-def main_menu():
-    keyboard = [
-        [InlineKeyboardButton(text="Проверка IP", callback_data="check_ip")],
-        [InlineKeyboardButton(text="Проверка email", callback_data="check_email")],
-        [InlineKeyboardButton(text="Проверка телефона", callback_data="check_phone")],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-@dp.message(F.text, F.text.lower().in_(["/start", "старт", "начать"]))
+@dp.message(commands=["start"])
 async def start_handler(message: Message):
-    await message.answer("Выберите тип проверки:", reply_markup=main_menu())
-@dp.callback_query(F.data == "check_ip")
-async def process_ip_callback(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("Введите IP-адрес для проверки:")
-    await state.set_state(Form.waiting_for_ip)
-    await callback.answer()
+    await message.answer(f"Привет, {hbold(message.from_user.full_name)}!\nВыбери, что хочешь проверить:\n\n"
+                         "/check_ip — Проверить IP\n"
+                         "/check_phone — Проверить номер телефона\n"
+                         "/check_email — Проверить email")
 
-@dp.message(Form.waiting_for_ip)
-async def handle_ip_input(message: Message, state: FSMContext):
-    ip = message.text.strip()
+
+@dp.message(commands=["check_ip"])
+async def check_ip(message: Message):
+    await message.answer("Отправь IP-адрес для проверки.")
+
+
+@dp.message(commands=["check_phone"])
+async def check_phone(message: Message):
+    await message.answer("Отправь номер телефона в формате +71234567890.")
+
+
+@dp.message(commands=["check_email"])
+async def check_email(message: Message):
+    await message.answer("Отправь email для проверки.")
+
+
+@dp.message()
+async def handle_input(message: Message):
+    text = message.text.strip()
+
+    if text.count(".") == 3:  # вероятно IP
+        await check_ip_info(message, text)
+    elif "@" in text:  # email
+        await check_email_info(message, text)
+    elif text.startswith("+") and text[1:].isdigit():
+        await check_phone_info(message, text)
+    else:
+        await message.answer("Не могу определить формат. Попробуй ещё раз.")
+
+
+async def check_ip_info(message: Message, ip: str):
     url = f"https://ipgeolocation.abstractapi.com/v1/?api_key={ABSTRACT_API_KEY}&ip_address={ip}"
-    
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            data = await resp.json()
-    
-    risk_score = int(data.get("security", {}).get("threat_score", 0))
-    color = "🟢" if risk_score < 30 else "🟡" if risk_score < 70 else "🔴"
-    info = f"""
-<b>Проверка IP:</b> {ip}
-<b>Страна:</b> {data.get("country")}
-<b>Город:</b> {data.get("city")}
-<b>ZIP:</b> {data.get("postal_code")}
-<b>Провайдер:</b> {data.get("connection", {}).get("isp_name")}
-<b>VPN/Proxy:</b> {'Да' if data.get("security", {}).get("is_vpn") or data.get("security", {}).get("is_proxy") else 'Нет'}
-<b>Оценка риска:</b> {risk_score}/100 {color}
-"""
-    await message.answer(info.strip(), parse_mode=ParseMode.HTML)
-    await state.clear()
-@dp.callback_query(F.data == "check_email")
-async def process_email_callback(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("Введите email для проверки:")
-    await state.set_state(Form.waiting_for_email)
-    await callback.answer()
- @dp.message(Form.waiting_for_email)
-async def handle_email_input(message: Message, state: FSMContext):
-    email = message.text.strip()
+    async with ClientSession() as session:
+        async with session.get(url) as response:
+            data = await response.json()
+
+    risk_score = data.get("security", {}).get("threat_score", 0)
+    risk_color = "🟢" if risk_score < 40 else "🟡" if risk_score < 70 else "🔴"
+
+    msg = (f"{risk_color} <b>IP:</b> {ip}\n"
+           f"<b>Страна:</b> {data.get('country')}\n"
+           f"<b>Регион:</b> {data.get('region')}\n"
+           f"<b>Город:</b> {data.get('city')}\n"
+           f"<b>Почтовый индекс:</b> {data.get('postal_code')}\n"
+           f"<b>Провайдер:</b> {data.get('connection', {}).get('isp_name')}\n"
+           f"<b>VPN/Proxy:</b> {'Да' if data.get('security', {}).get('is_vpn') else 'Нет'}\n"
+           f"<b>Оценка риска:</b> {risk_score}/100")
+    await message.answer(msg)
+
+
+async def check_phone_info(message: Message, phone: str):
+    url = f"http://apilayer.net/api/validate?access_key={NUMVERIFY_API_KEY}&number={phone}&format=1"
+    async with ClientSession() as session:
+        async with session.get(url) as response:
+            data = await response.json()
+
+    valid = data.get("valid")
+    risk = 90 if not valid else 10
+    risk_color = "🟢" if risk < 40 else "🟡" if risk < 70 else "🔴"
+
+    msg = (f"{risk_color} <b>Номер:</b> {phone}\n"
+           f"<b>Валиден:</b> {'Да' if valid else 'Нет'}\n"
+           f"<b>Страна:</b> {data.get('country_name')}\n"
+           f"<b>Оператор:</b> {data.get('carrier')}\n"
+           f"<b>Формат:</b> {data.get('international_format')}\n"
+           f"<b>Оценка риска:</b> {risk}/100")
+    await message.answer(msg)
+
+
+async def check_email_info(message: Message, email: str):
     url = f"https://emailvalidation.abstractapi.com/v1/?api_key={ABSTRACT_API_KEY}&email={email}"
-    
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            data = await resp.json()
+    async with ClientSession() as session:
+        async with session.get(url) as response:
+            data = await response.json()
 
-    risk_score = 0
-    if not data.get("is_valid_format", {}).get("value"):
-        risk_score += 40
-    if data.get("is_disposable", {}).get("value"):
-        risk_score += 30
-    if not data.get("is_smtp_valid", {}).get("value"):
-        risk_score += 30
+    risk_score = 80 if not data.get("deliverability") == "DELIVERABLE" else 10
+    risk_color = "🟢" if risk_score < 40 else "🟡" if risk_score < 70 else "🔴"
 
-    color = "🟢" if risk_score < 30 else "🟡" if risk_score < 70 else "🔴"
-    
-    info = f"""
-<b>Проверка Email:</b> {email}
-<b>Формат:</b> {'Корректный' if data.get("is_valid_format", {}).get("value") else 'Некорректный'}
-<b>Существует:</b> {'Да' if data.get("is_smtp_valid", {}).get("value") else 'Нет'}
-<b>Провайдер:</b> {data.get("domain")}
-<b>Временный:</b> {'Да' if data.get("is_disposable", {}).get("value") else 'Нет'}
-<b>Оценка риска:</b> {risk_score}/100 {color}
-"""
-    await message.answer(info.strip(), parse_mode=ParseMode.HTML)
-    await state.clear()
-@dp.callback_query(F.data == "check_phone")
-async def process_phone_callback(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("Введите номер телефона для проверки (в международном формате, например: +14158586273):")
-    await state.set_state(Form.waiting_for_phone)
-    await callback.answer()
- @dp.message(Form.waiting_for_phone)
-async def handle_phone_input(message: Message, state: FSMContext):
-    phone = message.text.strip().replace(" ", "")
-    url = f"https://phonevalidation.abstractapi.com/v1/?api_key={ABSTRACT_API_KEY}&phone={phone}"
+    msg = (f"{risk_color} <b>Email:</b> {email}\n"
+           f"<b>Валиден:</b> {'Да' if data.get('is_valid_format', {}).get('value') else 'Нет'}\n"
+           f"<b>Домен:</b> {data.get('domain')}\n"
+           f"<b>Оценка риска:</b> {risk_score}/100")
+    await message.answer(msg)
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            data = await resp.json()
 
-    risk_score = 0
-    if not data.get("valid"):
-        risk_score += 50
-    if not data.get("line_type") or data.get("line_type") == "unknown":
-        risk_score += 25
-    if not data.get("carrier"):
-        risk_score += 25
-
-    color = "🟢" if risk_score < 30 else "🟡" if risk_score < 70 else "🔴"
-
-    info = f"""
-<b>Проверка телефона:</b> {phone}
-<b>Страна:</b> {data.get("country", {}).get("name", "Неизвестно")}
-<b>Оператор:</b> {data.get("carrier", "Неизвестно")}
-<b>Тип линии:</b> {data.get("line_type", "Неизвестно")}
-<b>Формат:</b> {'Корректный' if data.get("valid") else 'Некорректный'}
-<b>Оценка риска:</b> {risk_score}/100 {color}
-"""
-    await message.answer(info.strip(), parse_mode=ParseMode.HTML)
-    await state.clear()   
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(dp.start_polling(bot))

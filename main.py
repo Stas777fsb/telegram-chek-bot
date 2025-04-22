@@ -1,143 +1,171 @@
-import asyncio import aiohttp from aiogram import Bot, Dispatcher, F, Router, types from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton from aiogram.enums import ParseMode from aiogram.fsm.context import FSMContext from aiogram.fsm.state import StatesGroup, State from aiogram.fsm.storage.memory import MemoryStorage from aiogram.filters import Command
+import logging
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
+from aiogram.utils.markdown import hbold
+from aiogram.enums import ParseMode
+from aiogram.filters import CommandStart
+from aiogram import Router
+import aiohttp
+from datetime import datetime, timedelta
 
-bot = Bot(token="7797606083:AAESciBzaFUiMmWiuqoOM61Ef7I7vEXNkQU", parse_mode=ParseMode.HTML) dp = Dispatcher(storage=MemoryStorage()) router = Router()
+API_KEY = "76599f16ac4f4a359808485a87a8f3bd"
+BTC_WALLET = "19LQnQug2NoWm6bGTx9PWtdKMthHUtcEjF"
+LTC_WALLET = "ltc1qygzgqj47ygz2qsazquj20u20lffss6dkdn0qk2"
 
-class CheckState(StatesGroup): ip = State() email = State() phone = State()
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-Главное меню
+bot = Bot(token="7797606083:AAESciBzaFUiMmWiuqoOM61Ef7I7vEXNkQU", parse_mode=ParseMode.HTML)
+dp = Dispatcher(storage=MemoryStorage())
+router = Router()
+dp.include_router(router)
 
-main_kb = ReplyKeyboardMarkup( keyboard=[ [KeyboardButton(text="Проверка IP")], [KeyboardButton(text="Проверка Email")], [KeyboardButton(text="Проверка номера телефона")] ], resize_keyboard=True )
+user_data = {}
 
-@router.message(Command("start")) async def start_cmd(message: Message): await message.answer("Привет! Я бот для проверки IP, email и телефона.", reply_markup=main_kb)
+class CheckState(StatesGroup):
+    ip = State()
+    email = State()
+    phone = State()
 
-Обработка кнопок меню
+main_kb = ReplyKeyboardMarkup(keyboard=[
+    [KeyboardButton(text="Проверка IP"), KeyboardButton(text="Проверка email")],
+    [KeyboardButton(text="Проверка номера телефона")],
+    [KeyboardButton(text="Пополнить баланс")]
+], resize_keyboard=True)
 
-@router.message(F.text == "Проверка IP") async def check_ip(message: Message, state: FSMContext): await message.answer("Введите IP-адрес для проверки:") await state.set_state(CheckState.ip)
+def get_color_for_risk(score):
+    if score < 30:
+        return "🟢"
+    elif score < 70:
+        return "🟡"
+    else:
+        return "🔴"
 
-@router.message(F.text == "Проверка Email") async def check_email(message: Message, state: FSMContext): await message.answer("Введите email для проверки:") await state.set_state(CheckState.email)
+@router.message(CommandStart())
+async def start_handler(message: types.Message):
+    user_id = message.from_user.id
+    if user_id not in user_data:
+        user_data[user_id] = {
+            "balance": 0.0,
+            "free_ip_checks": 10,
+            "last_reset": datetime.utcnow().date()
+        }
+    await message.answer(f"Добро пожаловать, {hbold(message.from_user.first_name)}!\n\n"
+                         f"Ваш ID: <code>{user_id}</code>\n"
+                         f"Баланс: <b>{user_data[user_id]['balance']:.2f}$</b>\n"
+                         f"Доступно бесплатных IP-проверок: {user_data[user_id]['free_ip_checks']}",
+                         reply_markup=main_kb)
 
-@router.message(F.text == "Проверка номера телефона") async def check_phone(message: Message, state: FSMContext): await message.answer("Введите номер телефона для проверки:") await state.set_state(CheckState.phone)
+@router.message(F.text == "Проверка IP")
+async def ask_ip(message: types.Message, state: FSMContext):
+    await state.set_state(CheckState.ip)
+    await message.answer("Введите IP-адрес для проверки:")
 
-Проверка IP через Abstract API
+@router.message(CheckState.ip)
+async def check_ip(message: types.Message, state: FSMContext):
+    ip = message.text
+    user_id = message.from_user.id
+    today = datetime.utcnow().date()
+    user = user_data[user_id]
 
-@router.message(CheckState.ip) async def process_ip(message: Message, state: FSMContext): ip = message.text.strip() api_key = "76599f16ac4f4a359808485a87a8f3bd" url = f"https://ipgeolocation.abstractapi.com/v1/?api_key={api_key}&ip_address={ip}"
+    if user["last_reset"] != today:
+        user["last_reset"] = today
+        user["free_ip_checks"] = 10
 
-async with aiohttp.ClientSession() as session:
-    async with session.get(url) as resp:
-        if resp.status != 200:
-            await message.answer("Ошибка при запросе данных. Попробуй позже.")
-            await state.clear()
-            return
-        data = await resp.json()
+    if user["free_ip_checks"] <= 0 and user["balance"] < 0.10:
+        await message.answer("У вас закончились бесплатные проверки и недостаточно средств на балансе.")
+        return
 
-country = data.get("country", "N/A")
-region = data.get("region", "N/A")
-city = data.get("city", "N/A")
-postal = data.get("postal_code", "N/A")
-isp = data.get("connection", {}).get("isp_name", "N/A")
-is_vpn = data.get("security", {}).get("is_vpn", False)
-is_proxy = data.get("security", {}).get("is_proxy", False)
-is_tor = data.get("security", {}).get("is_tor", False)
-blacklist = data.get("security", {}).get("is_blacklisted", False)
+    if user["free_ip_checks"] > 0:
+        user["free_ip_checks"] -= 1
+    else:
+        user["balance"] -= 0.10
 
-risk_score = 0
-if is_vpn: risk_score += 30
-if is_proxy: risk_score += 30
-if is_tor: risk_score += 40
-if blacklist: risk_score += 20
-if risk_score > 100: risk_score = 100
+    url = f"https://ipgeolocation.abstractapi.com/v1/?api_key={API_KEY}&ip_address={ip}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            data = await resp.json()
 
-if risk_score < 30:
-    color = "🟢 Низкий риск"
-elif risk_score < 70:
-    color = "🟡 Средний риск"
-else:
-    color = "🔴 Высокий риск"
+    risk_score = 80 if data.get("is_vpn", False) else 20
+    color = get_color_for_risk(risk_score)
 
-result = (
-    f"<b>Результат проверки IP</b>:\n"
-    f"<b>IP:</b> {ip}\n"
-    f"<b>Страна:</b> {country}\n"
-    f"<b>Регион:</b> {region}\n"
-    f"<b>Город:</b> {city}, {postal}\n"
-    f"<b>Провайдер:</b> {isp}\n"
-    f"<b>VPN:</b> {'Да' if is_vpn else 'Нет'}\n"
-    f"<b>Прокси:</b> {'Да' if is_proxy else 'Нет'}\n"
-    f"<b>TOR:</b> {'Да' if is_tor else 'Нет'}\n"
-    f"<b>В черном списке:</b> {'Да' if blacklist else 'Нет'}\n"
-    f"<b>Оценка риска:</b> {risk_score}/100\n"
-    f"{color}"
-)
-await message.answer(result)
-await state.clear()
+    text = (
+        f"{color} <b>IP:</b> {ip}\n"
+        f"<b>Страна:</b> {data.get('country')}\n"
+        f"<b>Регион:</b> {data.get('region')}\n"
+        f"<b>Город:</b> {data.get('city')}\n"
+        f"<b>Почтовый индекс:</b> {data.get('postal_code')}\n"
+        f"<b>Провайдер:</b> {data.get('connection', {}).get('isp_name')}\n"
+        f"<b>VPN/Proxy:</b> {'Да' if data.get('is_vpn') else 'Нет'}\n"
+        f"<b>Оценка риска:</b> {risk_score}/100"
+    )
+    await state.clear()
+    await message.answer(text)
 
-Проверка Email
+@router.message(F.text == "Проверка email")
+async def ask_email(message: types.Message, state: FSMContext):
+    await state.set_state(CheckState.email)
+    await message.answer("Введите email для проверки:")
 
-@router.message(CheckState.email) async def process_email(message: Message, state: FSMContext): email = message.text.strip() api_key = "76599f16ac4f4a359808485a87a8f3bd" url = f"https://emailvalidation.abstractapi.com/v1/?api_key={api_key}&email={email}"
+@router.message(CheckState.email)
+async def check_email(message: types.Message, state: FSMContext):
+    email = message.text
+    url = f"https://emailvalidation.abstractapi.com/v1/?api_key={API_KEY}&email={email}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            data = await resp.json()
 
-async with aiohttp.ClientSession() as session:
-    async with session.get(url) as resp:
-        if resp.status != 200:
-            await message.answer("Ошибка при проверке email.")
-            await state.clear()
-            return
-        data = await resp.json()
+    risk_score = 80 if data.get("is_disposable_email") else 20
+    color = get_color_for_risk(risk_score)
 
-is_valid = data.get("is_valid_format", {}).get("value", False)
-is_disposable = data.get("is_disposable_email", {}).get("value", False)
-is_blacklisted = data.get("is_blacklisted", {}).get("value", False)
-quality_score = data.get("quality_score", "0")
+    text = (
+        f"{color} <b>Email:</b> {email}\n"
+        f"<b>Валиден:</b> {'Да' if data.get('is_valid_format', {}).get('value') else 'Нет'}\n"
+        f"<b>Временный:</b> {'Да' if data.get('is_disposable_email') else 'Нет'}\n"
+        f"<b>Домен:</b> {data.get('domain')}\n"
+        f"<b>Оценка риска:</b> {risk_score}/100"
+    )
+    await state.clear()
+    await message.answer(text)
 
-risk = float(quality_score)
-if risk >= 0.8:
-    color = "🟢 Надежный email"
-elif risk >= 0.5:
-    color = "🟡 Средний риск"
-else:
-    color = "🔴 Высокий риск"
+@router.message(F.text == "Проверка номера телефона")
+async def ask_phone(message: types.Message, state: FSMContext):
+    await state.set_state(CheckState.phone)
+    await message.answer("Введите номер телефона (в формате +71234567890):")
 
-result = (
-    f"<b>Результат проверки Email</b>:\n"
-    f"<b>Email:</b> {email}\n"
-    f"<b>Формат:</b> {'Корректный' if is_valid else 'Некорректный'}\n"
-    f"<b>Временный:</b> {'Да' if is_disposable else 'Нет'}\n"
-    f"<b>В черных списках:</b> {'Да' if is_blacklisted else 'Нет'}\n"
-    f"<b>Оценка качества:</b> {quality_score}\n"
-    f"{color}"
-)
-await message.answer(result)
-await state.clear()
+@router.message(CheckState.phone)
+async def check_phone(message: types.Message, state: FSMContext):
+    phone = message.text
+    url = f"https://phonevalidation.abstractapi.com/v1/?api_key={API_KEY}&phone={phone}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            data = await resp.json()
 
-Проверка номера телефона
+    risk_score = 20 if data.get("valid") else 90
+    color = get_color_for_risk(risk_score)
 
-@router.message(CheckState.phone) async def process_phone(message: Message, state: FSMContext): phone = message.text.strip() api_key = "76599f16ac4f4a359808485a87a8f3bd" url = f"https://phonevalidation.abstractapi.com/v1/?api_key={api_key}&phone={phone}"
+    text = (
+        f"{color} <b>Номер:</b> {phone}\n"
+        f"<b>Валиден:</b> {'Да' if data.get('valid') else 'Нет'}\n"
+        f"<b>Страна:</b> {data.get('country', {}).get('name')}\n"
+        f"<b>Оператор:</b> {data.get('carrier')}\n"
+        f"<b>Формат:</b> {data.get('format', {}).get('international')}\n"
+        f"<b>Оценка риска:</b> {risk_score}/100"
+    )
+    await state.clear()
+    await message.answer(text)
 
-async with aiohttp.ClientSession() as session:
-    async with session.get(url) as resp:
-        if resp.status != 200:
-            await message.answer("Ошибка при проверке номера телефона.")
-            await state.clear()
-            return
-        data = await resp.json()
+@router.message(F.text == "Пополнить баланс")
+async def top_up(message: types.Message):
+    await message.answer(
+        "<b>Выберите способ пополнения:</b>\n\n"
+        f"<b>BTC:</b>\n<code>{BTC_WALLET}</code>\n\n"
+        f"<b>LTC:</b>\n<code>{LTC_WALLET}</code>"
+    )
 
-valid = data.get("valid", False)
-country = data.get("country", "N/A")
-location = data.get("location", "N/A")
-type_ = data.get("type", "N/A")
-carrier = data.get("carrier", "N/A")
-
-result = (
-    f"<b>Результат проверки телефона</b>:\n"
-    f"<b>Телефон:</b> {phone}\n"
-    f"<b>Действителен:</b> {'Да' if valid else 'Нет'}\n"
-    f"<b>Страна:</b> {country}\n"
-    f"<b>Город:</b> {location}\n"
-    f"<b>Тип:</b> {type_}\n"
-    f"<b>Оператор:</b> {carrier}"
-)
-await message.answer(result)
-await state.clear()
-
-async def main(): dp.include_router(router) await dp.start_polling(bot)
-
-if name == "main": asyncio.run(main())
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(dp.start_polling(bot))

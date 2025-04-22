@@ -12,7 +12,7 @@ from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 API_KEY = "76599f16ac4f4a359808485a87a8f3bd"
 
-bot = Bot(token="YOUR_TELEGRAM_BOT_TOKEN", parse_mode=ParseMode.HTML) dp = Dispatcher(storage=MemoryStorage())
+bot = Bot(token="7797606083:AAESciBzaFUiMmWiuqoOM61Ef7I7vEXNkQU", parse_mode=ParseMode.HTML) dp = Dispatcher(storage=MemoryStorage())
 
 class CheckState(StatesGroup): ip = State() email = State() phone = State()
 
